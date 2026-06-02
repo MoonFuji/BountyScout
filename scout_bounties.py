@@ -54,6 +54,9 @@ DENY_REPOS = [
 # Hiring-funnel labels/notes that mean the bounty is not open to outside hunters.
 INTERVIEW_GATE = ["reserved for se interview", "reserved for candidates", "interview process"]
 
+# Repo descriptions that mark a throwaway test rig (e.g. auto-bounty-solver sandboxes), not a real project.
+SANDBOX_TERMS = ["sandbox", "fixture", "test rig", "playground", "auto-solver", "bounty-solving", "bounty solving"]
+
 
 def load_seen_bounties():
     """Load previously seen bounty URLs from the state file."""
@@ -153,8 +156,33 @@ def evaluate(item):
         return None
     if any(g in haystack for g in INTERVIEW_GATE):
         return None
+    if "epic" in _label_names(item):  # tracking issues split into many slices = saturated, not one winnable bounty
+        return None
 
     return amount, age
+
+
+_sandbox_cache = {}
+
+
+def is_sandbox_repo(repo_fullname, token):
+    """True if the repo's description marks it a throwaway test/sandbox fixture (not a real project)."""
+    if repo_fullname in _sandbox_cache:
+        return _sandbox_cache[repo_fullname]
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "BountyScout",
+               "X-GitHub-Api-Version": "2022-11-28"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    verdict = False
+    try:
+        req = urllib.request.Request(f"https://api.github.com/repos/{repo_fullname}", headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            desc = str(json.loads(r.read().decode("utf-8")).get("description") or "").lower()
+            verdict = any(t in desc for t in SANDBOX_TERMS)
+    except Exception as e:
+        print(f"repo meta error for {repo_fullname}: {e}")
+    _sandbox_cache[repo_fullname] = verdict
+    return verdict
 
 
 def send_telegram_notification(token, chat_id, message):
@@ -220,6 +248,8 @@ def main():
                 amount, age = verdict
                 repo = url.split("/issues/")[0].replace("https://github.com/", "")
                 seen_urls.add(url)  # mark seen regardless, so farms don't re-flood next run
+                if is_sandbox_repo(repo, github_token):
+                    continue
                 if repo_counts.get(repo, 0) >= MAX_PER_REPO:
                     continue
                 repo_counts[repo] = repo_counts.get(repo, 0) + 1
