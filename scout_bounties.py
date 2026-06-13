@@ -156,7 +156,7 @@ def evaluate(item):
         return None
     if any(g in haystack for g in INTERVIEW_GATE):
         return None
-    if "epic" in _label_names(item):  # tracking issues split into many slices = saturated, not one winnable bounty
+    if "epic" in _label_names(item) or re.search(r"\bepic\b", str(item.get("title", "")), re.IGNORECASE):  # tracking issues split into many slices = saturated, not one winnable bounty
         return None
 
     return amount, age
